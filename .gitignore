@@ -1,0 +1,11 @@
+.codex_git/
+.env
+*.env
+
+hou/.idea/
+hou/__pycache__/
+hou/**/__pycache__/
+hou/uploads/
+hou/chroma_rag_db/
+
+qian/unpackage/
