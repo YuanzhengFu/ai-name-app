@@ -1,11 +1,15 @@
 .codex_git/
+.agents/
 .env
 *.env
 
-hou/.idea/
-hou/__pycache__/
-hou/**/__pycache__/
-hou/uploads/
-hou/chroma_rag_db/
+FastAPIProject/.env
+FastAPIProject/.idea/
+FastAPIProject/.pytest_cache/
+FastAPIProject/__pycache__/
+FastAPIProject/**/__pycache__/
+FastAPIProject/uploads/
+FastAPIProject/chroma_rag_db/
 
-qian/unpackage/
+uniapp-demo01/unpackage/
+uniapp-demo01/static/unpackage/
