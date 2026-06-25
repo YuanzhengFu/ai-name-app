@@ -1,10 +1,112 @@
-# AI 智能起名项目部署文档
+# AI 智能起名系统
 
-本项目包含 FastAPI 后端和 uni-app 前端。后端依赖 MySQL、PostgreSQL、Redis、RabbitMQ、Ollama、Chroma、DeepSeek 和 SMTP 邮箱服务；前端建议使用 HBuilderX 打开 `uniapp-demo01/` 运行和打包。
+本项目是一个面向 H5、移动端和本地演示场景的 AI 智能起名全栈应用。系统包含 FastAPI 后端和 uni-app 前端，支持人名、企业名和宠物名生成，并扩展了注册登录、会员额度、多轮反馈、命名项目、偏好模板、历史收藏、名字评分、报告导出、企业私有知识库 RAG、异步解析任务和管理员后台等能力。
 
-## 1. 基础环境
+前端源码位于 `uniapp-demo01/`，建议使用 HBuilderX 打开运行；后端源码位于 `FastAPIProject/`，Python 环境使用 conda 中的 `fastapi-env`。
 
-后端 Python 环境使用 conda 中的 `fastapi-env`。
+## 主要功能
+
+### 智能起名
+
+- 支持 `人名`、`企业名`、`宠物名` 三类起名。
+- 支持姓氏、性别气质、字数要求、期望寓意、行业、风格、地区、排除词等输入。
+- 使用 LangGraph 组织起名流程，支持基于 `thread_id` 的多轮反馈。
+- 起名结果保存为历史记录，并支持收藏、对比和继续反馈。
+- 对候选名字进行音律、寓意、传播、域名等维度评分。
+
+### 企业知识库 RAG
+
+- 企业名场景支持上传 TXT/PDF 私有知识库文件。
+- 上传后创建异步解析任务，通过 RabbitMQ 投递到 `rag_worker.py`。
+- Worker 解析文件并写入 Chroma 本地向量库。
+- 企业名生成时检索用户私有知识库，结合业务资料生成候选名字。
+- 支持知识库任务状态查询、预览、启停和重新解析。
+
+### 会员额度与订单
+
+- 新用户默认获得免费起名额度。
+- 起名生成和多轮反馈都会消耗额度，失败时自动退回。
+- 支持会员套餐、充值订单、额度流水和 mock 支付流程。
+- 管理员可以调整用户额度、维护套餐、重置用户密码和处理退款。
+
+### 项目、模板与报告
+
+- 支持创建命名项目，并将起名历史关联到项目。
+- 支持偏好模板，便于复用常用起名要求。
+- 历史记录和项目均支持导出 `pdf`、`image`、`txt` 报告。
+
+### 管理员后台
+
+- 管理员可查看用户、起名历史、生成统计和知识库任务。
+- 支持单个或批量触发知识库任务重新解析。
+- 提供白名单业务数据维护接口，避免直接暴露通用 SQL 控制台。
+- 敏感字段受保护，用户密码哈希不会直接暴露或直接编辑。
+
+## 技术架构
+
+- 前端：uni-app、Vue。
+- API：FastAPI、Uvicorn。
+- 业务数据库：MySQL、SQLAlchemy、Alembic。
+- 会话记忆：PostgreSQL、LangGraph checkpoint。
+- 缓存与限流：Redis。
+- 异步任务：RabbitMQ。
+- 大语言模型：DeepSeek。
+- RAG：Chroma、Ollama `nomic-embed-text`。
+- 报告导出：reportlab、PIL。
+- 测试：pytest、临时 SQLite、外部依赖 mock。
+
+## 目录结构
+
+```text
+ainame397project/
+├── FastAPIProject/              FastAPI 后端项目
+│   ├── main.py                  应用入口
+│   ├── dependencies.py          公共依赖和鉴权
+│   ├── settings/                环境变量和配置
+│   ├── models/                  SQLAlchemy ORM 模型
+│   ├── schemas/                 Pydantic 请求和响应模型
+│   ├── repository/              数据访问封装
+│   ├── routers/                 API 路由
+│   ├── core/                    起名、RAG、会员、报告、管理员等核心逻辑
+│   ├── alembictable/            Alembic 迁移
+│   ├── tests/                   pytest 自动化测试
+│   ├── rag_worker.py            知识库解析 Worker
+│   ├── create_admin.py          创建或更新管理员
+│   ├── manage_data.py           管理员数据维护命令行脚本
+│   └── requirements.txt         后端依赖
+├── uniapp-demo01/               uni-app 前端项目
+│   ├── pages/                   页面源码
+│   ├── http/http.js             请求封装
+│   ├── utils/reportExport.js    报告导出工具
+│   ├── App.vue
+│   ├── main.js
+│   ├── pages.json
+│   └── manifest.json
+├── .env.example                 环境变量示例
+├── AGENTS.md                    开发维护上下文
+├── requirements.md              需求说明和验收标准
+├── CHANGELOG.md                 更新记录
+└── README.md                    项目说明
+```
+
+运行时目录如 `FastAPIProject/uploads/`、`FastAPIProject/chroma_rag_db/`、`uniapp-demo01/unpackage/`、`__pycache__/` 不应提交到 Git。
+
+## 环境要求
+
+- Windows 本地开发环境。
+- Conda 环境：`fastapi-env`。
+- MySQL 8.x。
+- PostgreSQL 14+。
+- Redis。
+- RabbitMQ。
+- Ollama，并安装 `nomic-embed-text`。
+- DeepSeek API Key。
+- SMTP 邮箱服务。
+- HBuilderX。
+
+## 安装依赖
+
+后端 Python 环境使用 conda 中的 `fastapi-env`：
 
 ```powershell
 conda activate fastapi-env
@@ -12,9 +114,13 @@ cd E:\ainame397project\FastAPIProject
 pip install -r requirements.txt
 ```
 
-前端当前没有 `package.json`，不要按普通 npm/Vite 项目处理。请使用 HBuilderX 打开 `E:\ainame397project\uniapp-demo01`。
+前端当前没有 `package.json`，不要按普通 npm/Vite 项目处理。请使用 HBuilderX 打开：
 
-## 2. 环境变量
+```text
+E:\ainame397project\uniapp-demo01
+```
+
+## 配置环境变量
 
 复制根目录 `.env.example` 到后端目录：
 
@@ -22,7 +128,7 @@ pip install -r requirements.txt
 Copy-Item E:\ainame397project\.env.example E:\ainame397project\FastAPIProject\.env
 ```
 
-后端配置读取 `FastAPIProject/.env`。至少需要配置以下变量：
+后端配置读取 `FastAPIProject/.env`。至少需要配置：
 
 ```env
 DB_URI=mysql+aiomysql://root:password@127.0.0.1:3306/ainame397?charset=utf8mb4
@@ -52,16 +158,18 @@ UPLOAD_DIR=uploads
 CHROMA_RAG_DB_PATH=chroma_rag_db
 MAX_UPLOAD_BYTES=10485760
 ALLOWED_KNOWLEDGE_EXTENSIONS=.txt,.pdf
+
+PAYMENT_DEFAULT_PROVIDER=mock
+PAYMENT_PUBLIC_BASE_URL=http://127.0.0.1:8000
 ```
 
 不要把真实数据库密码、DeepSeek API Key、邮箱授权码、JWT 密钥写入文档、提交记录或聊天内容。
 
-## 3. MySQL 初始化
+## 初始化外部服务
 
-MySQL 保存业务数据，包括用户、起名历史、知识库任务、会员套餐、额度流水和订单。
+### MySQL
 
-1. 安装并启动 MySQL 8.x。
-2. 创建业务数据库，字符集使用 `utf8mb4`：
+MySQL 保存用户、起名历史、知识库任务、会员套餐、额度流水和订单。
 
 ```sql
 CREATE DATABASE ainame397
@@ -69,21 +177,7 @@ CREATE DATABASE ainame397
   COLLATE utf8mb4_unicode_ci;
 ```
 
-3. 创建或确认数据库账号有该库的读写、建表和迁移权限：
-
-```sql
-CREATE USER 'ainame'@'%' IDENTIFIED BY 'change-me';
-GRANT ALL PRIVILEGES ON ainame397.* TO 'ainame'@'%';
-FLUSH PRIVILEGES;
-```
-
-4. 将 `FastAPIProject/.env` 中的 `DB_URI` 改为实际连接串，例如：
-
-```env
-DB_URI=mysql+aiomysql://ainame:change-me@127.0.0.1:3306/ainame397?charset=utf8mb4
-```
-
-5. 执行业务表迁移：
+执行迁移：
 
 ```powershell
 conda activate fastapi-env
@@ -91,39 +185,15 @@ cd E:\ainame397project\FastAPIProject
 alembic upgrade head
 ```
 
-## 4. PostgreSQL 初始化
+### PostgreSQL
 
 PostgreSQL 用于 LangGraph checkpoint 记忆库。项目中同时保留了 `DB_URI1` 和 `LANGGRAPH_DB_URI`，实际 LangGraph 工作流读取 `LANGGRAPH_DB_URI`。
-
-1. 安装并启动 PostgreSQL 14+。
-2. 创建 checkpoint 数据库：
 
 ```sql
 CREATE DATABASE ainame397;
 ```
 
-3. 创建或确认账号权限：
-
-```sql
-CREATE USER ainame_pg WITH PASSWORD 'change-me';
-GRANT ALL PRIVILEGES ON DATABASE ainame397 TO ainame_pg;
-```
-
-如果使用 PostgreSQL 15+，还需要进入目标库授权 schema：
-
-```sql
-\c ainame397
-GRANT ALL ON SCHEMA public TO ainame_pg;
-```
-
-4. 配置 `FastAPIProject/.env`：
-
-```env
-LANGGRAPH_DB_URI=postgresql://ainame_pg:change-me@127.0.0.1:5432/ainame397
-DB_URI1=postgresql+psycopg://ainame_pg:change-me@127.0.0.1:5432/ainame397
-```
-
-5. 初始化 LangGraph checkpoint 表：
+初始化 LangGraph checkpoint 表：
 
 ```powershell
 conda activate fastapi-env
@@ -131,41 +201,23 @@ cd E:\ainame397project\FastAPIProject
 python init_pg_memory.py
 ```
 
-## 5. Redis 初始化
+### Redis
 
-Redis 用于邮箱验证码缓存和限流计数。
-
-1. 安装并启动 Redis。
-2. 确认本地可连接：
+Redis 用于邮箱验证码缓存和限流计数：
 
 ```powershell
 redis-cli ping
 ```
 
-返回 `PONG` 即可。
-
-3. 配置 `FastAPIProject/.env`：
-
-```env
-REDIS_URL=redis://127.0.0.1:6379/0
-EMAIL_CODE_TTL_SECONDS=300
-EMAIL_CODE_EMAIL_COOLDOWN_SECONDS=60
-EMAIL_CODE_EMAIL_HOURLY_LIMIT=5
-EMAIL_CODE_IP_HOURLY_LIMIT=20
-```
-
-如果 Redis 设置了密码，连接串格式为：
+返回 `PONG` 即可。带密码连接示例：
 
 ```env
 REDIS_URL=redis://:password@127.0.0.1:6379/0
 ```
 
-## 6. RabbitMQ 初始化
+### RabbitMQ
 
-RabbitMQ 用于知识库文件解析任务队列。后端上传文件后会向队列投递任务，`rag_worker.py` 负责消费。
-
-1. 安装并启动 RabbitMQ。
-2. 创建账号和虚拟主机：
+RabbitMQ 用于知识库文件解析任务队列：
 
 ```powershell
 rabbitmqctl add_user admin admin123
@@ -173,90 +225,37 @@ rabbitmqctl add_vhost ainame
 rabbitmqctl set_permissions -p ainame admin ".*" ".*" ".*"
 ```
 
-3. 配置 `FastAPIProject/.env`：
+配置示例：
 
 ```env
 RABBITMQ_URL=amqp://admin:admin123@127.0.0.1:5672/ainame
 RAG_QUEUE_NAME=rag_document_queue
 ```
 
-4. 队列由代码自动声明，名称为 `rag_document_queue`。也可以提前在 RabbitMQ 管理后台确认该队列是否出现。
+### Ollama 和 Chroma
 
-## 7. Ollama 初始化
-
-Ollama 用于 RAG embedding，当前代码固定使用 `nomic-embed-text`。
-
-1. 安装并启动 Ollama。
-2. 拉取 embedding 模型：
+Ollama 用于 RAG embedding，当前使用 `nomic-embed-text`：
 
 ```powershell
 ollama pull nomic-embed-text
-```
-
-3. 验证模型可用：
-
-```powershell
 ollama list
 ```
 
-需要能看到 `nomic-embed-text`。知识库解析 Worker 调用 `langchain_ollama.OllamaEmbeddings(model="nomic-embed-text")`，默认连接本机 Ollama 服务。
-
-## 8. Chroma 初始化
-
-Chroma 保存用户私有知识库向量数据。当前项目使用本地持久化目录，不需要单独启动 Chroma 服务。
-
-1. 配置持久化目录：
+Chroma 使用本地持久化目录，不需要单独启动服务：
 
 ```env
 CHROMA_RAG_DB_PATH=chroma_rag_db
 ```
 
-相对路径会解析到 `FastAPIProject/chroma_rag_db`。
+### DeepSeek 和 SMTP
 
-2. 确保目录可写：
-
-```powershell
-cd E:\ainame397project\FastAPIProject
-New-Item -ItemType Directory -Force chroma_rag_db
-```
-
-3. 首次上传并解析 TXT/PDF 知识库文件后，代码会自动创建 Chroma sqlite 文件和 collection。每个用户使用 `user_{user_id}_docs` collection。
-
-`FastAPIProject/chroma_rag_db/` 是运行时数据目录，不应作为核心源码提交。
-
-## 9. DeepSeek 初始化
-
-DeepSeek 用于起名大模型生成，代码使用 `langchain_deepseek.ChatDeepSeek`，模型名为 `deepseek-chat`。
-
-1. 在 DeepSeek 控制台创建 API Key。
-2. 配置 `FastAPIProject/.env`：
+DeepSeek 用于起名大模型生成：
 
 ```env
 DEEPSEEK_API_KEY=your-deepseek-api-key
 ```
 
-3. 确认运行机器可以访问 DeepSeek API。没有有效 API Key 时，后端启动或起名生成会失败。
-
-## 10. SMTP 初始化
-
-SMTP 用于注册邮箱验证码和邮件测试接口。
-
-1. 准备邮箱服务商 SMTP 账号。QQ 邮箱通常使用授权码而不是登录密码。
-2. 开启 SMTP 服务并获取授权码。
-3. 配置 `FastAPIProject/.env`：
-
-```env
-MAIL_USERNAME=your-email@example.com
-MAIL_PASSWORD=your-email-auth-code
-MAIL_FROM=your-email@example.com
-MAIL_PORT=587
-MAIL_SERVER=smtp.qq.com
-MAIL_FROM_NAME=ainameapp
-MAIL_STARTTLS=true
-MAIL_SSL_TLS=false
-```
-
-常见配置：
+SMTP 用于注册验证码和邮件测试接口。常见配置：
 
 - 端口 `587`：通常使用 `MAIL_STARTTLS=true`、`MAIL_SSL_TLS=false`。
 - 端口 `465`：通常使用 `MAIL_STARTTLS=false`、`MAIL_SSL_TLS=true`。
@@ -267,11 +266,11 @@ MAIL_SSL_TLS=false
 Invoke-RestMethod "http://127.0.0.1:8000/mail/test?email=target@example.com"
 ```
 
-## 11. 启动服务
+## 启动项目
 
 先启动外部依赖：MySQL、PostgreSQL、Redis、RabbitMQ、Ollama。
 
-然后启动后端：
+启动后端：
 
 ```powershell
 conda activate fastapi-env
@@ -279,7 +278,7 @@ cd E:\ainame397project\FastAPIProject
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-再启动知识库 Worker：
+启动知识库 Worker：
 
 ```powershell
 conda activate fastapi-env
@@ -298,17 +297,12 @@ python create_admin.py --email admin@example.com --username admin --password 123
 前端运行：
 
 1. 使用 HBuilderX 打开 `E:\ainame397project\uniapp-demo01`。
-2. 确认 `uniapp-demo01/http/http.js` 中的后端地址：
+2. 默认后端地址为 `http://127.0.0.1:8000`。
+3. 如果运行到真机、模拟器或小程序环境，在登录页将后端地址改为电脑局域网 IP，例如 `http://192.168.x.x:8000`。
 
-```js
-const BASE_URL = "http://127.0.0.1:8000";
-```
+## 测试与检查
 
-3. 按 uni-app 项目方式运行到浏览器、模拟器或小程序环境。
-
-## 12. 测试与检查
-
-后端测试使用临时 SQLite 数据库，并 mock LangGraph/LLM、RabbitMQ 等外部依赖。常规测试命令：
+后端测试使用临时 SQLite 数据库，并 mock LangGraph/LLM、RabbitMQ 等外部依赖。
 
 ```powershell
 cd E:\ainame397project\FastAPIProject
@@ -337,7 +331,7 @@ conda run --no-capture-output -n fastapi-env python -m compileall -q .
 - 知识库上传、任务失败、单个和批量重试。
 - 管理员数据维护接口的白名单、密码字段隐藏、敏感字段拒绝、当前管理员删除保护、套餐数据维护。
 
-## 13. 部署检查清单
+## 部署检查清单
 
 启动完成后按以下顺序检查：
 
@@ -351,9 +345,10 @@ conda run --no-capture-output -n fastapi-env python -m compileall -q .
 8. DeepSeek API Key 有效，`/names/generate` 能返回候选名字。
 9. SMTP 配置有效，注册验证码邮件可以送达。
 
-## 14. 生产部署注意事项
+## 安全提醒
 
 - 生产环境必须替换 `JWT_SECRET_KEY`、数据库密码、RabbitMQ 密码、邮箱授权码和 DeepSeek API Key。
+- `FastAPIProject/.env` 包含真实配置，禁止提交或分享。
 - `CORS_ALLOW_ORIGINS` 不要使用 `*`，应配置真实前端域名。
 - `UPLOAD_DIR` 和 `CHROMA_RAG_DB_PATH` 需要挂载到持久化磁盘。
 - RabbitMQ、Redis、MySQL、PostgreSQL 不建议暴露到公网。
