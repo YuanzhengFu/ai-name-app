@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Annotated
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -48,7 +49,7 @@ class MembershipAccountOut(BaseModel):
 
 class RechargeIn(BaseModel):
     plan_id: int
-    provider: str = "mock"
+    pay_scene: Literal["page", "wap"] = "page"
 
 
 class RechargeOrderOut(BaseModel):
@@ -69,13 +70,6 @@ class RechargeOrderOut(BaseModel):
     updated_time: datetime
 
     model_config = {"from_attributes": True}
-
-
-class PaymentNotifyIn(BaseModel):
-    out_trade_no: str
-    trade_no: str = ""
-    status: str
-    message: str = ""
 
 
 class PaymentRefundIn(BaseModel):

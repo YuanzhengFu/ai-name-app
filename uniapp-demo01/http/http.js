@@ -150,9 +150,9 @@ export default {
 
   getMembership: () => request("/membership/me", { method: "GET" }),
   getMembershipPlans: () => request("/membership/plans", { method: "GET" }),
-  rechargeMembership: (planId, provider = "mock") => request("/membership/recharge", { method: "POST", data: { plan_id: planId, provider } }),
+  rechargeMembership: (planId, payScene = "page") => request("/membership/recharge", { method: "POST", data: { plan_id: planId, pay_scene: payScene } }),
   getRechargeOrder: (orderId) => request(`/membership/orders/${orderId}`, { method: "GET" }),
-  mockPayRechargeOrder: (orderId) => request(`/membership/orders/${orderId}/mock-pay`, { method: "POST" }),
+  alipayQueryRechargeOrder: (orderId) => request(`/membership/orders/${orderId}/alipay-query`, { method: "POST" }),
   getCreditTransactions: (params) => request("/membership/transactions" + buildQuery(params), { method: "GET" }),
 
   uploadKnowledge: (filePath, projectId) => uploadFile("/knowledge/upload" + buildQuery({ project_id: projectId }), filePath),

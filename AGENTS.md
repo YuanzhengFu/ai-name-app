@@ -2,7 +2,7 @@
 
 ## 项目定位
 
-本仓库是一个“AI 智能起名”全栈项目，包含 FastAPI 后端和 uni-app 前端。当前项目已经从基础起名接口扩展为完整应用雏形，覆盖注册登录、邮箱验证码、会员额度、AI 起名、多轮反馈、项目管理、偏好模板、起名历史、收藏、名字评分、报告导出、企业私有知识库 RAG、异步解析任务、管理员后台和业务数据维护等能力。
+本仓库是一个“AI 智能起名”全栈项目，包含 FastAPI 后端和 uni-app 前端。当前项目已经从基础起名接口扩展为完整应用雏形，覆盖注册登录、邮箱验证码、会员额度、支付宝沙箱充值、AI 起名、多轮反馈、项目管理、偏好模板、起名历史、收藏、名字评分、报告导出、企业私有知识库 RAG、异步解析任务、管理员后台和业务数据维护等能力。
 
 后端 Python 环境使用 conda 中的 `fastapi-env`。运行测试、脚本、迁移和本地服务时优先使用该环境。
 
@@ -21,7 +21,7 @@
 - `AGENTS.md`：本文件，给维护者和代码代理使用的项目上下文。
 - `.codex_git/`：当前工作区使用的 Git 元数据目录，不是业务源码。
 
-真实配置通常位于 `FastAPIProject/.env`，可能包含数据库连接串、API Key、SMTP 授权码、JWT 密钥等敏感信息。不要把真实值写入文档、日志、提交信息或聊天内容。
+真实配置通常位于 `FastAPIProject/.env`，可能包含数据库连接串、API Key、SMTP 授权码、JWT 密钥和支付私钥路径等敏感信息。不要把真实值写入文档、日志、提交信息或聊天内容。
 
 ## 后端结构
 
@@ -55,6 +55,7 @@
 - DeepSeek：大模型起名生成。
 - SMTP 邮件服务：发送注册验证码。
 - whois 服务：企业名 `.com` 域名状态查询。
+- 支付宝沙箱：会员充值支付链接、异步通知验签和交易查询。
 
 ## 前端结构
 
@@ -183,8 +184,9 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `POST /membership/recharge`
 - `GET /membership/orders/{order_id}`
 - `POST /membership/orders/{order_id}/processing`
-- `POST /membership/orders/{order_id}/mock-pay`
-- `POST /membership/payment/notify/{provider}`
+- `POST /membership/orders/{order_id}/mock-pay`：遗留接口，当前返回 410，不再用于增加额度。
+- `POST /membership/orders/{order_id}/alipay-query`：主动查询支付宝交易状态并同步本地订单。
+- `POST /membership/payment/notify/{provider}`：当前仅支持 `alipay` 通知。
 - `GET /membership/transactions`
 
 管理员接口：
@@ -447,8 +449,11 @@ rag_document_queue
 - 起名生成、旧版起名接口、多轮反馈都会消耗额度。
 - 生成失败会退回本次消耗的额度。
 - 额度不足时返回 `402 Payment Required`。
-- 充值订单支持 `mock`、`wechat`、`alipay` provider。
-- `mock` provider 需要调用 `/membership/orders/{order_id}/mock-pay` 才会真正标记 paid 并增加额度。
+- 充值订单当前使用 `alipay` provider，生成支付宝沙箱 `page` 或 `wap` 支付链接。
+- 支付宝异步通知会验签，并按交易状态将订单更新为 paid、processing 或 failed。
+- 用户可调用 `/membership/orders/{order_id}/alipay-query` 主动同步支付宝订单状态。
+- `/membership/orders/{order_id}/mock-pay` 是遗留关闭接口，当前返回 `410 Gone`，不要依赖它完成充值。
+- `wechat` 相关配置项保留为后续扩展，当前业务主流程未完整接入微信支付。
 - 管理员可以创建或更新套餐、退款订单、调整用户额度和重置用户密码。
 
 ## 管理员数据维护
@@ -635,6 +640,7 @@ conda run --no-capture-output -n fastapi-env python -m compileall -q .
 - `ALLOWED_KNOWLEDGE_EXTENSIONS`
 - `PAYMENT_DEFAULT_PROVIDER`
 - `PAYMENT_PUBLIC_BASE_URL`
+- `PAYMENT_RETURN_URL`
 - `WECHAT_PAY_APPID`
 - `WECHAT_PAY_MCH_ID`
 - `WECHAT_PAY_API_V3_KEY`
@@ -645,7 +651,7 @@ conda run --no-capture-output -n fastapi-env python -m compileall -q .
 - `ALIPAY_PRIVATE_KEY_PATH`
 - `ALIPAY_PUBLIC_KEY_PATH`
 
-真实值应只放在本地 `.env` 或安全环境变量中。
+真实值应只放在本地 `.env` 或安全环境变量中。支付宝私钥、公钥文件不要提交到 Git，路径通过 `ALIPAY_PRIVATE_KEY_PATH`、`ALIPAY_PUBLIC_KEY_PATH` 配置。
 
 ## 测试现状
 
@@ -677,7 +683,7 @@ conda run -n fastapi-env python -m pytest -q
 - `uniapp-demo01/static/` 下有重复源码遗留，维护前端时以根层 `uniapp-demo01/pages/`、`http/`、`utils/` 为准。
 - 管理员数据维护不是通用 SQL 控制台，不应绕过白名单和字段限制。
 - 生产部署前应收紧 CORS，配置明确允许域名，不建议长期使用 `*`。
-- 真实支付尚未完整接入，当前主要是订单状态流和 mock 支付能力。
+- 支付宝当前面向沙箱联调，正式收款前需要完成生产应用配置、证书/密钥、回调地址、对账和退款链路校验；不要把 mock 支付当作可用充值链路。
 - RAG、DeepSeek、RabbitMQ、Redis、PostgreSQL、Ollama、Chroma 任一外部服务不可用，都可能导致局部功能失败或变慢。
 - `process_and_stor_file` 拼写错误是兼容现状，除非同步更新所有引用，不要单独改名。
 - 如果 HBuilderX 或真机提示网络连接失败，先确认后端是否启动，再确认前端登录页 API 地址是否指向电脑局域网 IP。

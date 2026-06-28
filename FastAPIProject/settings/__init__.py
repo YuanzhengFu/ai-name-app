@@ -78,8 +78,9 @@ CHROMA_RAG_DB_PATH = _path_env("CHROMA_RAG_DB_PATH", BASE_DIR / "chroma_rag_db")
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 ALLOWED_KNOWLEDGE_EXTENSIONS = {item.lower() for item in _csv_env("ALLOWED_KNOWLEDGE_EXTENSIONS", ".txt,.pdf")}
 
-PAYMENT_DEFAULT_PROVIDER = os.getenv("PAYMENT_DEFAULT_PROVIDER", "mock")
+PAYMENT_DEFAULT_PROVIDER = os.getenv("PAYMENT_DEFAULT_PROVIDER", "alipay")
 PAYMENT_PUBLIC_BASE_URL = os.getenv("PAYMENT_PUBLIC_BASE_URL", "")
+PAYMENT_RETURN_URL = os.getenv("PAYMENT_RETURN_URL", "")
 
 WECHAT_PAY_APPID = os.getenv("WECHAT_PAY_APPID", "")
 WECHAT_PAY_MCH_ID = os.getenv("WECHAT_PAY_MCH_ID", "")
@@ -88,6 +89,6 @@ WECHAT_PAY_SERIAL_NO = os.getenv("WECHAT_PAY_SERIAL_NO", "")
 WECHAT_PAY_PRIVATE_KEY_PATH = os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", "")
 
 ALIPAY_APP_ID = os.getenv("ALIPAY_APP_ID", "")
-ALIPAY_GATEWAY = os.getenv("ALIPAY_GATEWAY", "https://openapi.alipay.com/gateway.do")
+ALIPAY_GATEWAY = os.getenv("ALIPAY_GATEWAY", "https://openapi-sandbox.dl.alipaydev.com/gateway.do")
 ALIPAY_PRIVATE_KEY_PATH = os.getenv("ALIPAY_PRIVATE_KEY_PATH", "")
 ALIPAY_PUBLIC_KEY_PATH = os.getenv("ALIPAY_PUBLIC_KEY_PATH", "")

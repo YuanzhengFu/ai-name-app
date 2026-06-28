@@ -68,6 +68,7 @@ const plans = ref([]);
 const transactions = ref([]);
 const loading = ref(false);
 const rechargingId = ref(0);
+const pendingOrderId = ref(uni.getStorageSync('pending_alipay_order_id') || 0);
 
 const expiresText = computed(() => {
   if (!account.value.expires_at) return '长期';
@@ -94,6 +95,7 @@ const refreshAll = async () => {
     account.value = accountRes;
     plans.value = planRes || [];
     transactions.value = txRes.items || [];
+    await syncPendingAlipayOrder();
   } catch (error) {
     console.error('加载会员信息失败', error);
   } finally {
@@ -104,17 +106,72 @@ const refreshAll = async () => {
 const recharge = async (plan) => {
   rechargingId.value = plan.id;
   try {
-    const order = await http.rechargeMembership(plan.id);
-    if (order.provider === 'mock') {
-      await http.mockPayRechargeOrder(order.id);
+    const order = await http.rechargeMembership(plan.id, getPayScene());
+    const payload = parsePaymentPayload(order.payment_payload);
+    if (!payload.checkout_url) {
+      uni.showToast({ title: 'Payment link failed', icon: 'none' });
+      return;
     }
-    uni.showToast({ title: '充值成功', icon: 'success' });
-    await refreshAll();
+    pendingOrderId.value = order.id;
+    uni.setStorageSync('pending_alipay_order_id', order.id);
+    openAlipayCheckout(payload.checkout_url);
   } catch (error) {
     console.error('充值失败', error);
   } finally {
     rechargingId.value = 0;
   }
+};
+
+const syncPendingAlipayOrder = async () => {
+  const orderId = pendingOrderId.value || uni.getStorageSync('pending_alipay_order_id');
+  if (!orderId) return;
+
+  let order = await http.getRechargeOrder(orderId);
+  if (order.status === 'pending' || order.status === 'processing') {
+    order = await http.alipayQueryRechargeOrder(orderId);
+  }
+
+  if (order.status === 'paid' || order.status === 'failed' || order.status === 'refunded') {
+    pendingOrderId.value = 0;
+    uni.removeStorageSync('pending_alipay_order_id');
+    if (order.status === 'paid') {
+      const [accountRes, txRes] = await Promise.all([
+        http.getMembership(),
+        http.getCreditTransactions({ limit: 30, offset: 0 })
+      ]);
+      account.value = accountRes;
+      transactions.value = txRes.items || [];
+      uni.showToast({ title: 'Paid', icon: 'success' });
+    }
+  }
+};
+
+const parsePaymentPayload = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return {};
+  }
+};
+
+const getPayScene = () => {
+  const platform = String(uni.getSystemInfoSync().platform || '').toLowerCase();
+  return platform === 'ios' || platform === 'android' ? 'wap' : 'page';
+};
+
+const openAlipayCheckout = (url) => {
+  // #ifdef H5
+  window.location.href = url;
+  // #endif
+  // #ifndef H5
+  if (typeof plus !== 'undefined' && plus.runtime) {
+    plus.runtime.openURL(url);
+  } else {
+    uni.showModal({ title: 'Alipay link', content: url, showCancel: false });
+  }
+  // #endif
 };
 
 const formatPrice = (cents = 0) => (Number(cents || 0) / 100).toFixed(2);

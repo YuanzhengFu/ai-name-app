@@ -1,8 +1,8 @@
 # AI 智能起名系统
 
-本项目是一个面向 H5、移动端和本地演示场景的 AI 智能起名全栈应用。系统包含 FastAPI 后端和 uni-app 前端，支持人名、企业名和宠物名生成，并扩展了注册登录、会员额度、多轮反馈、命名项目、偏好模板、历史收藏、名字评分、报告导出、企业私有知识库 RAG、异步解析任务和管理员后台等能力。
+本项目是一个面向 H5、移动端和本地演示场景的 AI 智能起名全栈应用。系统包含 FastAPI 后端和 uni-app 前端，支持人名、企业名和宠物名生成，并扩展了注册登录、邮箱验证码、会员额度、支付宝沙箱充值、多轮反馈、命名项目、偏好模板、历史收藏、名字评分、报告导出、企业私有知识库 RAG、异步解析任务、管理员后台和业务数据维护等能力。
 
-前端源码位于 `uniapp-demo01/`，建议使用 HBuilderX 打开运行；后端源码位于 `FastAPIProject/`，Python 环境使用 conda 中的 `fastapi-env`。
+前端源码位于 `uniapp-demo01/`，建议使用 HBuilderX 打开运行；后端源码位于 `FastAPIProject/`，Python 环境使用 conda 中的 `fastapi-env`。旧目录名如 `hou/`、`qian/`、`ainame397/`、`ainame397q/` 已经过时，不作为当前源码入口维护。
 
 ## 主要功能
 
@@ -22,11 +22,13 @@
 - 企业名生成时检索用户私有知识库，结合业务资料生成候选名字。
 - 支持知识库任务状态查询、预览、启停和重新解析。
 
-### 会员额度与订单
+### 会员额度、订单与支付
 
 - 新用户默认获得免费起名额度。
 - 起名生成和多轮反馈都会消耗额度，失败时自动退回。
-- 支持会员套餐、充值订单、额度流水和 mock 支付流程。
+- 支持会员套餐、充值订单、额度流水和支付宝沙箱支付。
+- 充值订单会生成支付宝 `page` 或 `wap` 支付链接，支持异步通知验签和主动查询订单状态。
+- 历史 mock 支付接口已关闭，当前本地调试充值建议使用支付宝沙箱配置。
 - 管理员可以调整用户额度、维护套餐、重置用户密码和处理退款。
 
 ### 项目、模板与报告
@@ -52,6 +54,7 @@
 - 异步任务：RabbitMQ。
 - 大语言模型：DeepSeek。
 - RAG：Chroma、Ollama `nomic-embed-text`。
+- 支付：支付宝沙箱 RSA2 签名、异步通知、交易查询。
 - 报告导出：reportlab、PIL。
 - 测试：pytest、临时 SQLite、外部依赖 mock。
 
@@ -159,11 +162,17 @@ CHROMA_RAG_DB_PATH=chroma_rag_db
 MAX_UPLOAD_BYTES=10485760
 ALLOWED_KNOWLEDGE_EXTENSIONS=.txt,.pdf
 
-PAYMENT_DEFAULT_PROVIDER=mock
+PAYMENT_DEFAULT_PROVIDER=alipay
 PAYMENT_PUBLIC_BASE_URL=http://127.0.0.1:8000
+PAYMENT_RETURN_URL=http://127.0.0.1:8000
+
+ALIPAY_APP_ID=your-sandbox-app-id
+ALIPAY_GATEWAY=https://openapi-sandbox.dl.alipaydev.com/gateway.do
+ALIPAY_PRIVATE_KEY_PATH=certs/alipay_app_private_key.pem
+ALIPAY_PUBLIC_KEY_PATH=certs/alipay_public_key.pem
 ```
 
-不要把真实数据库密码、DeepSeek API Key、邮箱授权码、JWT 密钥写入文档、提交记录或聊天内容。
+不要把真实数据库密码、DeepSeek API Key、邮箱授权码、JWT 密钥、支付宝私钥写入文档、提交记录或聊天内容。
 
 ## 初始化外部服务
 
@@ -266,6 +275,18 @@ SMTP 用于注册验证码和邮件测试接口。常见配置：
 Invoke-RestMethod "http://127.0.0.1:8000/mail/test?email=target@example.com"
 ```
 
+### 支付宝沙箱
+
+会员充值当前默认使用支付宝沙箱。后端会基于订单生成支付宝支付链接，并通过 `/membership/payment/notify/alipay` 接收异步通知。
+
+需要准备：
+
+- 支付宝沙箱应用 `ALIPAY_APP_ID`。
+- 应用私钥文件，对应 `ALIPAY_PRIVATE_KEY_PATH`。
+- 支付宝公钥文件，对应 `ALIPAY_PUBLIC_KEY_PATH`。
+- 可被支付宝沙箱访问的后端公网地址，写入 `PAYMENT_PUBLIC_BASE_URL`。纯本机 `127.0.0.1` 只能用于生成链接和本地调试，不能接收沙箱公网回调。
+- 支付完成后的跳转地址 `PAYMENT_RETURN_URL`，未配置时回退到 `PAYMENT_PUBLIC_BASE_URL`。
+
 ## 启动项目
 
 先启动外部依赖：MySQL、PostgreSQL、Redis、RabbitMQ、Ollama。
@@ -277,6 +298,8 @@ conda activate fastapi-env
 cd E:\ainame397project\FastAPIProject
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+如需调试支付宝沙箱回调，`PAYMENT_PUBLIC_BASE_URL` 需要配置为可公网访问的 HTTPS/HTTP 地址，并转发到本地后端服务。
 
 启动知识库 Worker：
 
@@ -344,13 +367,15 @@ conda run --no-capture-output -n fastapi-env python -m compileall -q .
 7. Chroma 目录可写，解析完成后 `FastAPIProject/chroma_rag_db` 生成持久化文件。
 8. DeepSeek API Key 有效，`/names/generate` 能返回候选名字。
 9. SMTP 配置有效，注册验证码邮件可以送达。
+10. 支付宝沙箱密钥和公网回调地址有效，充值订单可生成支付链接并通过通知或查询更新订单状态。
 
 ## 安全提醒
 
-- 生产环境必须替换 `JWT_SECRET_KEY`、数据库密码、RabbitMQ 密码、邮箱授权码和 DeepSeek API Key。
+- 生产环境必须替换 `JWT_SECRET_KEY`、数据库密码、RabbitMQ 密码、邮箱授权码、DeepSeek API Key 和支付密钥。
 - `FastAPIProject/.env` 包含真实配置，禁止提交或分享。
+- 支付宝私钥和公钥文件不要放入 Git；建议放在部署环境的安全路径，并通过环境变量引用。
 - `CORS_ALLOW_ORIGINS` 不要使用 `*`，应配置真实前端域名。
 - `UPLOAD_DIR` 和 `CHROMA_RAG_DB_PATH` 需要挂载到持久化磁盘。
 - RabbitMQ、Redis、MySQL、PostgreSQL 不建议暴露到公网。
-- 当前充值流程默认 `PAYMENT_DEFAULT_PROVIDER=mock`，属于模拟支付；接入真实支付前不要用于生产收款。
+- 当前充值流程面向支付宝沙箱调试，真实收款前需要完成正式应用、证书/密钥、回调地址、对账和退款链路校验。
 - `FastAPIProject/uploads/`、`FastAPIProject/chroma_rag_db/`、`uniapp-demo01/unpackage/`、`__pycache__/` 属于运行或构建产物，不应作为核心源码维护。

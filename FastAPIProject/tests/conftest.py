@@ -66,6 +66,26 @@ def fake_redis() -> FakeRedis:
     return FakeRedis()
 
 
+@pytest.fixture(autouse=True)
+def fake_alipay(monkeypatch):
+    def build_pay_url(self, *, out_trade_no: str, subject: str, total_amount: str, pay_scene: str = "page") -> str:
+        return f"https://openapi-sandbox.dl.alipaydev.com/gateway.do?out_trade_no={out_trade_no}&pay_scene={pay_scene}"
+
+    async def query_trade(self, out_trade_no: str) -> dict:
+        return {
+            "out_trade_no": out_trade_no,
+            "trade_no": f"ali-query-{out_trade_no}",
+            "trade_status": "TRADE_SUCCESS",
+        }
+
+    def verify_notify(self, data: dict[str, str]) -> bool:
+        return data.get("sign") != "invalid"
+
+    monkeypatch.setattr("core.alipay_service.AlipayService.build_pay_url", build_pay_url)
+    monkeypatch.setattr("core.alipay_service.AlipayService.query_trade", query_trade)
+    monkeypatch.setattr("core.alipay_service.AlipayService.verify_notify", verify_notify)
+
+
 @pytest.fixture
 async def session_maker(tmp_path):
     db_path = tmp_path / "test.db"

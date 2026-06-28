@@ -1,3 +1,5 @@
+import json
+
 from sqlalchemy import func, select
 
 from core.membership_service import DEFAULT_FREE_CREDITS
@@ -171,19 +173,29 @@ async def test_membership_recharge_and_transactions(client, session_maker):
 
     recharge_response = await client.post(
         "/membership/recharge",
-        json={"plan_id": plan.id},
+        json={"plan_id": plan.id, "provider": "mock"},
         headers=auth_headers(user.id),
     )
     assert recharge_response.status_code == 200
     assert recharge_response.json()["credits"] == 30
     assert recharge_response.json()["status"] == "pending"
+    assert recharge_response.json()["provider"] == "alipay"
+    payload = json.loads(recharge_response.json()["payment_payload"])
+    assert payload["provider"] == "alipay"
+    assert "openapi-sandbox" in payload["checkout_url"]
 
     async with session_maker() as session:
         account = await session.scalar(select(UserMembership).where(UserMembership.user_id == user.id))
         assert account.credit_balance == DEFAULT_FREE_CREDITS
 
-    pay_response = await client.post(
+    mock_pay_response = await client.post(
         f"/membership/orders/{recharge_response.json()['id']}/mock-pay",
+        headers=auth_headers(user.id),
+    )
+    assert mock_pay_response.status_code == 410
+
+    pay_response = await client.post(
+        f"/membership/orders/{recharge_response.json()['id']}/alipay-query",
         headers=auth_headers(user.id),
     )
     assert pay_response.status_code == 200
@@ -203,7 +215,7 @@ async def test_membership_recharge_and_transactions(client, session_maker):
         assert account.credit_balance == DEFAULT_FREE_CREDITS + 30
         assert recharge.balance_after == DEFAULT_FREE_CREDITS + 30
         assert order.status == "paid"
-        assert order.provider == "mock"
+        assert order.provider == "alipay"
 
 
 async def test_membership_payment_notify_failure_and_refund(client, session_maker):
@@ -211,42 +223,36 @@ async def test_membership_payment_notify_failure_and_refund(client, session_make
     admin = await create_user(session_maker, email="admin-pay@example.com", is_admin=True)
     plan = await create_plan(session_maker, credits=15)
 
-    failed_order_response = await client.post(
-        "/membership/recharge",
-        json={"plan_id": plan.id, "provider": "wechat"},
-        headers=auth_headers(user.id),
-    )
-    assert failed_order_response.status_code == 200
-
-    failed_notify_response = await client.post(
-        "/membership/payment/notify/wechat",
-        json={
-            "out_trade_no": str(failed_order_response.json()["id"]),
-            "trade_no": "wx-fail-1",
-            "status": "failed",
-            "message": "payment closed",
-        },
-    )
-    assert failed_notify_response.status_code == 200
-    assert failed_notify_response.json()["status"] == "failed"
-
     paid_order_response = await client.post(
         "/membership/recharge",
-        json={"plan_id": plan.id, "provider": "alipay"},
+        json={"plan_id": plan.id, "pay_scene": "wap"},
         headers=auth_headers(user.id),
     )
     assert paid_order_response.status_code == 200
 
     paid_notify_response = await client.post(
         "/membership/payment/notify/alipay",
-        json={
+        data={
             "out_trade_no": str(paid_order_response.json()["id"]),
             "trade_no": "ali-paid-1",
-            "status": "trade_success",
+            "trade_status": "TRADE_SUCCESS",
+            "sign": "valid",
         },
     )
     assert paid_notify_response.status_code == 200
-    assert paid_notify_response.json()["status"] == "paid"
+    assert paid_notify_response.text == "success"
+
+    duplicate_notify_response = await client.post(
+        "/membership/payment/notify/alipay",
+        data={
+            "out_trade_no": str(paid_order_response.json()["id"]),
+            "trade_no": "ali-paid-1",
+            "trade_status": "TRADE_SUCCESS",
+            "sign": "valid",
+        },
+    )
+    assert duplicate_notify_response.status_code == 200
+    assert duplicate_notify_response.text == "success"
 
     refund_response = await client.post(
         f"/admin/membership/orders/{paid_order_response.json()['id']}/refund",
@@ -259,3 +265,40 @@ async def test_membership_payment_notify_failure_and_refund(client, session_make
     async with session_maker() as session:
         account = await session.scalar(select(UserMembership).where(UserMembership.user_id == user.id))
         assert account.credit_balance == DEFAULT_FREE_CREDITS
+        recharge_count = await session.scalar(
+            select(func.count()).select_from(CreditTransaction).where(CreditTransaction.transaction_type == "recharge")
+        )
+        assert recharge_count == 1
+
+
+async def test_paid_order_rolls_back_when_crediting_fails(client, session_maker, monkeypatch):
+    user = await create_user(session_maker, email="rollback-pay@example.com")
+    plan = await create_plan(session_maker, credits=12)
+
+    recharge_response = await client.post(
+        "/membership/recharge",
+        json={"plan_id": plan.id},
+        headers=auth_headers(user.id),
+    )
+    assert recharge_response.status_code == 200
+    order_id = recharge_response.json()["id"]
+
+    def fail_credit(self, order, account):
+        raise RuntimeError("simulated credit failure")
+
+    monkeypatch.setattr("core.membership_service.MembershipService._credit_paid_order", fail_credit)
+    pay_response = await client.post(
+        f"/membership/orders/{order_id}/alipay-query",
+        headers=auth_headers(user.id),
+    )
+    assert pay_response.status_code == 500
+
+    async with session_maker() as session:
+        account = await session.scalar(select(UserMembership).where(UserMembership.user_id == user.id))
+        order = await session.scalar(select(RechargeOrder).where(RechargeOrder.id == order_id))
+        recharge_count = await session.scalar(
+            select(func.count()).select_from(CreditTransaction).where(CreditTransaction.transaction_type == "recharge")
+        )
+        assert account.credit_balance == DEFAULT_FREE_CREDITS
+        assert order.status == "pending"
+        assert recharge_count == 0

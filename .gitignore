@@ -8,6 +8,7 @@ FastAPIProject/.idea/
 FastAPIProject/.pytest_cache/
 FastAPIProject/__pycache__/
 FastAPIProject/**/__pycache__/
+FastAPIProject/certs/
 FastAPIProject/uploads/
 FastAPIProject/chroma_rag_db/
 

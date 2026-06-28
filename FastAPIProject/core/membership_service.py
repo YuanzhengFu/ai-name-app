@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio.session import AsyncSession
 from starlette.status import HTTP_400_BAD_REQUEST, HTTP_402_PAYMENT_REQUIRED, HTTP_404_NOT_FOUND
 
+from core.alipay_service import ALIPAY_STATUS_FAILED, ALIPAY_STATUS_PROCESSING, ALIPAY_STATUS_SUCCESS, AlipayService
 from models.membership import CreditTransaction, MembershipPlan, RechargeOrder, UserMembership
 
 
@@ -17,10 +18,7 @@ ORDER_STATUS_PAID = "paid"
 ORDER_STATUS_FAILED = "failed"
 ORDER_STATUS_REFUNDED = "refunded"
 
-PAYMENT_PROVIDER_MOCK = "mock"
-PAYMENT_PROVIDER_WECHAT = "wechat"
 PAYMENT_PROVIDER_ALIPAY = "alipay"
-PAYMENT_PROVIDERS = {PAYMENT_PROVIDER_MOCK, PAYMENT_PROVIDER_WECHAT, PAYMENT_PROVIDER_ALIPAY}
 
 
 def account_to_dict(account: UserMembership) -> dict:
@@ -111,11 +109,9 @@ class MembershipService:
         await self.session.refresh(plan)
         return plan
 
-    async def recharge(self, user_id: int, plan_id: int, provider: str = PAYMENT_PROVIDER_MOCK) -> RechargeOrder:
-        provider = provider.lower()
-        if provider not in PAYMENT_PROVIDERS:
-            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Unsupported payment provider")
-
+    async def recharge(self, user_id: int, plan_id: int, pay_scene: str = "page") -> RechargeOrder:
+        if pay_scene not in {"page", "wap"}:
+            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Unsupported alipay pay_scene")
         plan = await self.session.get(MembershipPlan, plan_id)
         if not plan or not plan.is_active:
             raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Membership plan not found or inactive")
@@ -128,30 +124,32 @@ class MembershipService:
             amount_cents=plan.price_cents,
             credits=plan.credits,
             status=ORDER_STATUS_PENDING,
-            provider=provider,
+            provider=PAYMENT_PROVIDER_ALIPAY,
         )
         self.session.add(order)
         await self.session.flush()
-        order.payment_payload = self._build_payment_payload(order)
+        order.payment_payload = self._build_payment_payload(order, pay_scene)
         await self.session.commit()
         await self.session.refresh(order)
         return order
 
-    def _build_payment_payload(self, order: RechargeOrder) -> str:
+    def _build_payment_payload(self, order: RechargeOrder, pay_scene: str = "page") -> str:
+        amount = f"{order.amount_cents / 100:.2f}"
+        checkout_url = AlipayService().build_pay_url(
+            out_trade_no=str(order.id),
+            subject=f"Membership plan: {order.plan_name}",
+            total_amount=amount,
+            pay_scene=pay_scene,
+        )
         payload = {
-            "provider": order.provider,
+            "provider": PAYMENT_PROVIDER_ALIPAY,
+            "pay_scene": pay_scene,
             "out_trade_no": str(order.id),
             "amount_cents": order.amount_cents,
+            "total_amount": amount,
             "description": f"Membership plan: {order.plan_name}",
+            "checkout_url": checkout_url,
         }
-        if order.provider == PAYMENT_PROVIDER_MOCK:
-            payload["checkout_url"] = f"mock://pay/orders/{order.id}"
-        elif order.provider == PAYMENT_PROVIDER_WECHAT:
-            payload["trade_type"] = "JSAPI"
-            payload["notify_url"] = "/membership/payment/notify/wechat"
-        elif order.provider == PAYMENT_PROVIDER_ALIPAY:
-            payload["product_code"] = "FAST_INSTANT_TRADE_PAY"
-            payload["notify_url"] = "/membership/payment/notify/alipay"
         return json.dumps(payload, ensure_ascii=False)
 
     async def get_order(self, user_id: int, order_id: int) -> RechargeOrder:
@@ -171,34 +169,49 @@ class MembershipService:
         return order
 
     async def mark_order_paid(self, order_id: int, provider_trade_no: str = "") -> tuple[RechargeOrder, UserMembership | None]:
-        order = await self.session.get(RechargeOrder, order_id, with_for_update=True)
-        if not order:
-            raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Order not found")
-        if order.status == ORDER_STATUS_PAID:
-            account = await self.session.scalar(select(UserMembership).where(UserMembership.user_id == order.user_id))
+        try:
+            order = await self.session.scalar(
+                select(RechargeOrder).where(RechargeOrder.id == order_id).with_for_update()
+            )
+            if not order:
+                raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Order not found")
+            if order.status == ORDER_STATUS_PAID:
+                account = await self.session.scalar(
+                    select(UserMembership).where(UserMembership.user_id == order.user_id).with_for_update()
+                )
+                await self.session.commit()
+                return order, account
+            if order.status in {ORDER_STATUS_FAILED, ORDER_STATUS_REFUNDED}:
+                raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Order cannot be paid in current status")
+
+            account = await self.session.scalar(
+                select(UserMembership).where(UserMembership.user_id == order.user_id).with_for_update()
+            )
+            if not account:
+                account = UserMembership(user_id=order.user_id)
+                self.session.add(account)
+                await self.session.flush()
+
+            order.status = ORDER_STATUS_PAID
+            order.paid_time = datetime.now()
+            order.provider_trade_no = provider_trade_no or order.provider_trade_no
+            plan = await self.session.get(MembershipPlan, order.plan_id)
+            if plan and plan.validity_days > 0:
+                base_time = account.expires_at if account.expires_at and account.expires_at > datetime.now() else datetime.now()
+                account.expires_at = base_time + timedelta(days=plan.validity_days)
+            self._credit_paid_order(order, account)
+            await self.session.commit()
+            await self.session.refresh(order)
+            await self.session.refresh(account)
             return order, account
-        if order.status in {ORDER_STATUS_FAILED, ORDER_STATUS_REFUNDED}:
-            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Order cannot be paid in current status")
+        except Exception:
+            await self.session.rollback()
+            raise
 
-        order.status = ORDER_STATUS_PAID
-        order.paid_time = datetime.now()
-        order.provider_trade_no = provider_trade_no or order.provider_trade_no
-        account = await self._credit_paid_order(order)
-        await self.session.commit()
-        await self.session.refresh(order)
-        await self.session.refresh(account)
-        return order, account
-
-    async def _credit_paid_order(self, order: RechargeOrder) -> UserMembership:
-        account = await self._get_locked_account(order.user_id)
+    def _credit_paid_order(self, order: RechargeOrder, account: UserMembership) -> None:
         account.plan_name = order.plan_name
         account.credit_balance += order.credits
         account.total_recharged += order.credits
-
-        plan = await self.session.get(MembershipPlan, order.plan_id)
-        if plan and plan.validity_days > 0:
-            base_time = account.expires_at if account.expires_at and account.expires_at > datetime.now() else datetime.now()
-            account.expires_at = base_time + timedelta(days=plan.validity_days)
 
         self.session.add(
             CreditTransaction(
@@ -210,7 +223,6 @@ class MembershipService:
                 remark=f"Order #{order.id}: {order.plan_name}",
             )
         )
-        return account
 
     async def mark_order_failed(self, order_id: int, reason: str = "") -> RechargeOrder:
         order = await self.session.get(RechargeOrder, order_id, with_for_update=True)
@@ -227,40 +239,62 @@ class MembershipService:
         return order
 
     async def refund_order(self, order_id: int, reason: str = "Payment refund") -> tuple[RechargeOrder, UserMembership]:
-        order = await self.session.get(RechargeOrder, order_id, with_for_update=True)
-        if not order:
-            raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Order not found")
-        if order.status == ORDER_STATUS_REFUNDED:
-            account = await self.session.scalar(select(UserMembership).where(UserMembership.user_id == order.user_id))
+        try:
+            order = await self.session.scalar(
+                select(RechargeOrder).where(RechargeOrder.id == order_id).with_for_update()
+            )
+            if not order:
+                raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Order not found")
+            account = await self.session.scalar(
+                select(UserMembership).where(UserMembership.user_id == order.user_id).with_for_update()
+            )
             if not account:
                 raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Credit account not found")
-            return order, account
-        if order.status != ORDER_STATUS_PAID:
-            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Only paid orders can be refunded")
+            if order.status == ORDER_STATUS_REFUNDED:
+                await self.session.commit()
+                return order, account
+            if order.status != ORDER_STATUS_PAID:
+                raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Only paid orders can be refunded")
+            if account.credit_balance < order.credits:
+                raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Insufficient credit balance to refund order")
 
-        account = await self._get_locked_account(order.user_id)
-        if account.credit_balance < order.credits:
-            await self.session.rollback()
-            raise HTTPException(status_code=HTTP_400_BAD_REQUEST, detail="Insufficient credit balance to refund order")
-
-        account.credit_balance -= order.credits
-        account.total_recharged = max(0, account.total_recharged - order.credits)
-        order.status = ORDER_STATUS_REFUNDED
-        order.refunded_time = datetime.now()
-        self.session.add(
-            CreditTransaction(
-                user_id=order.user_id,
-                change_amount=-order.credits,
-                balance_after=account.credit_balance,
-                transaction_type="payment_refund",
-                source=order.provider,
-                remark=f"Refund order #{order.id}: {reason}",
+            account.credit_balance -= order.credits
+            account.total_recharged = max(0, account.total_recharged - order.credits)
+            order.status = ORDER_STATUS_REFUNDED
+            order.refunded_time = datetime.now()
+            self.session.add(
+                CreditTransaction(
+                    user_id=order.user_id,
+                    change_amount=-order.credits,
+                    balance_after=account.credit_balance,
+                    transaction_type="payment_refund",
+                    source=order.provider,
+                    remark=f"Refund order #{order.id}: {reason}",
+                )
             )
-        )
-        await self.session.commit()
-        await self.session.refresh(order)
-        await self.session.refresh(account)
-        return order, account
+            await self.session.commit()
+            await self.session.refresh(order)
+            await self.session.refresh(account)
+            return order, account
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def sync_alipay_query(self, order_id: int) -> RechargeOrder:
+        result = await AlipayService().query_trade(str(order_id))
+        trade_status = str(result.get("trade_status", "")).upper()
+        trade_no = str(result.get("trade_no", ""))
+        if trade_status in ALIPAY_STATUS_SUCCESS:
+            order, _ = await self.mark_order_paid(order_id, trade_no)
+            return order
+        if trade_status in ALIPAY_STATUS_PROCESSING:
+            return await self.mark_order_processing(order_id)
+        if trade_status in ALIPAY_STATUS_FAILED:
+            return await self.mark_order_failed(order_id, trade_status)
+        order = await self.session.get(RechargeOrder, order_id)
+        if not order:
+            raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail="Order not found")
+        return order
 
     async def consume(self, user_id: int, amount: int = 1, remark: str = "AI name generation") -> CreditTransaction:
         if amount <= 0:

@@ -59,7 +59,7 @@ class RechargeOrder(Base):
     amount_cents: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", server_default="pending", index=True, nullable=False)
-    provider: Mapped[str] = mapped_column(String(20), default="mock", server_default="mock", index=True, nullable=False)
+    provider: Mapped[str] = mapped_column(String(20), default="alipay", server_default="alipay", index=True, nullable=False)
     provider_trade_no: Mapped[str] = mapped_column(String(100), default="", server_default="", index=True, nullable=False)
     payment_payload: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
     failure_reason: Mapped[str] = mapped_column(Text, default="", server_default="", nullable=False)
