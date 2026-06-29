@@ -122,6 +122,44 @@ async def test_existing_project_can_collect_generation_and_feedback(client, sess
     assert history_response.status_code == 200
     assert history_response.json()["total"] == 2
 
+
+async def test_feedback_uses_project_category_when_client_category_is_stale(client, session_maker, monkeypatch):
+    user = await create_user(session_maker)
+    seen = {}
+
+    project_response = await client.post(
+        "/projects",
+        json={"title": "Brand Sprint", "category": "企业名", "description": "Company naming work"},
+        headers=auth_headers(user.id),
+    )
+    assert project_response.status_code == 200
+    project_id = project_response.json()["id"]
+
+    async def fake_feedback_names(data, user_id):
+        seen["category"] = data.category
+        seen["project_id"] = data.project_id
+        return {
+            "thread_id": data.thread_id,
+            "names": {"names": [{"name": "云栖科技", "reference": "mock", "moral": "科技品牌感"}]},
+        }
+
+    monkeypatch.setattr(name_router, "feedback_names", fake_feedback_names)
+
+    feedback_response = await client.post(
+        "/names/feedback",
+        json={"thread_id": "thread-company", "project_id": project_id, "category": "人名", "feedback": "保留用字"},
+        headers=auth_headers(user.id),
+    )
+    assert feedback_response.status_code == 200
+    body = feedback_response.json()
+    assert seen == {"category": "企业名", "project_id": project_id}
+    assert body["names"][0]["category"] == "企业名"
+
+    history_response = await client.get(f"/history?project_id={project_id}", headers=auth_headers(user.id))
+    assert history_response.status_code == 200
+    assert history_response.json()["items"][0]["category"] == "企业名"
+
+
 async def test_compare_histories_returns_ranked_recommendation(client, session_maker):
     user = await create_user(session_maker)
     async with session_maker() as session:

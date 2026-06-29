@@ -289,6 +289,7 @@ const knowledgeLoading = ref(false);
 const quotaRemaining = ref('-');
 const currentProject = ref(null);
 const currentProjectId = ref(null);
+const currentResultCategory = ref('');
 const activeQuestionIndex = ref(0);
 const showAdvanced = ref(false);
 const excludeInput = ref('');
@@ -436,6 +437,7 @@ const loadProject = async (projectId) => {
     currentProject.value = project;
     currentProjectId.value = project.id;
     formData.value.category = project.category;
+    currentResultCategory.value = project.category;
     if (project.category === '企业名') {
       loadKnowledgeFiles();
     }
@@ -452,6 +454,7 @@ const clearProject = () => {
   names.value = [];
   threadId.value = '';
   feedbackText.value = '';
+  currentResultCategory.value = '';
   loadKnowledgeFiles();
 };
 
@@ -545,6 +548,7 @@ const applySelectedTemplate = () => {
   names.value = [];
   threadId.value = '';
   feedbackText.value = '';
+  currentResultCategory.value = '';
   if (template.category === '企业名') {
     loadKnowledgeFiles();
   }
@@ -660,6 +664,7 @@ const switchCategory = (cat) => {
   names.value = [];
   threadId.value = '';
   feedbackText.value = '';
+  currentResultCategory.value = '';
   activeQuestionIndex.value = 0;
   showAdvanced.value = false;
   selectedTemplateIndex.value = -1;
@@ -867,6 +872,7 @@ const handleGenerate = async () => {
     const res = await http.generateName(payload);
     names.value = res.names;
     threadId.value = res.thread_id;
+    currentResultCategory.value = payload.category;
     if (res.project_id) {
       currentProjectId.value = res.project_id;
       loadProject(res.project_id);
@@ -885,7 +891,7 @@ const buildPreferenceFeedback = (item, type = 'direction') => {
   const name = item?.name || '这个名字';
   const moral = String(item?.moral || '').trim();
   const reference = String(item?.reference || '').trim();
-  const category = formData.value.category;
+  const category = item?.category || currentResultCategory.value || formData.value.category;
   const base = `我喜欢“${name}”`;
 
   const prompts = {
@@ -913,13 +919,15 @@ const submitFeedback = async (feedback, successTitle = '已重新生成') => {
   uni.showLoading({ title: '微调修改中...' });
 
   try {
+    const feedbackCategory = currentResultCategory.value || currentProject.value?.category || formData.value.category;
     const res = await http.feedbackName({
       thread_id: threadId.value,
       project_id: currentProjectId.value,
-      category: formData.value.category,
+      category: feedbackCategory,
       feedback: text
     });
     names.value = res.names;
+    currentResultCategory.value = feedbackCategory;
     syncQuota(res);
     feedbackText.value = '';
     uni.showToast({ title: successTitle, icon: 'success' });

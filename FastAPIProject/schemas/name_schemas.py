@@ -7,6 +7,7 @@ class NameSchema(BaseModel):
     name: Annotated[str, Field(..., description="The name")]
     reference: Annotated[str, Field(..., description="The name source")]
     moral: Annotated[str, Field(..., description="寓意")]
+    category: str = Field(default="", description="起名分类")
     domain: str = Field("", description="为品牌设计的 .com 域名")
     domain_status: str = Field(default="", description="域名的注册状态")
     domain_checks: list[dict[str, str]] = Field(default_factory=list, description="Multi-suffix domain checks")

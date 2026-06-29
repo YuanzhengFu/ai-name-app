@@ -59,6 +59,7 @@ async def generate_names(
         )
         await project_repo.touch(project)
         for name, history in zip(names, histories):
+            name["category"] = name_info.category
             name["history_id"] = history.id
             name["project_id"] = history.project_id
             name["is_favorite"] = history.is_favorite
@@ -94,18 +95,24 @@ async def feedback(
     else:
         project = await project_repo.find_by_thread_id(user_id, data.thread_id)
 
+    effective_category = project.category if project else data.category
+    effective_project_id = project.id if project else data.project_id
+    feedback_data = data.model_copy(
+        update={"category": effective_category, "project_id": effective_project_id}
+    )
+
     membership = MembershipService(session)
     await membership.consume(user_id, remark="多轮反馈生成")
     try:
-        result = await feedback_names(data, user_id)
+        result = await feedback_names(feedback_data, user_id)
         names = result["names"]["names"]
         attach_name_scores(names)
         name_info = NameIn(
-            category=data.category,
-            surname="反馈记录" if data.category == "人名" else "",
+            category=effective_category,
+            surname="反馈记录" if effective_category == "人名" else "",
             gender="不限",
             length="",
-            other=data.feedback,
+            other=feedback_data.feedback,
             exclude=[],
         )
         histories = await NameHistoryRepository(session).create_many(
@@ -114,6 +121,7 @@ async def feedback(
         if project:
             await project_repo.touch(project)
         for name, history in zip(names, histories):
+            name["category"] = effective_category
             name["history_id"] = history.id
             name["project_id"] = history.project_id
             name["is_favorite"] = history.is_favorite
