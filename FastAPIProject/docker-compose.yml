@@ -1,0 +1,115 @@
+services:
+  web:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - postgres_db
+      - redis
+      - rabbitmq
+      - ollama
+    environment:
+      DB_URI: mysql+aiomysql://root:FYZfyz123..@db:3306/ainame397?charset=utf8mb4
+      DB_URI1: postgresql+psycopg://postgres:123456@postgres_db:5432/ainame
+      LANGGRAPH_DB_URI: postgresql://postgres:123456@postgres_db:5432/ainame
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      TRUST_PROXY_HEADERS: "true"
+      UPLOAD_DIR: /app/uploads
+      CHROMA_RAG_DB_PATH: /app/chroma_rag_db
+      OLLAMA_HOST: http://ollama:11434
+    expose:
+      - "8000"
+    volumes:
+      - uploads_data:/app/uploads
+      - chroma_data:/app/chroma_rag_db
+      - ./certs:/app/certs:ro
+
+  worker:
+    build: .
+    restart: always
+    command: ["python", "rag_worker.py"]
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - postgres_db
+      - redis
+      - rabbitmq
+      - ollama
+    environment:
+      DB_URI: mysql+aiomysql://root:FYZfyz123..@db:3306/ainame397?charset=utf8mb4
+      DB_URI1: postgresql+psycopg://postgres:123456@postgres_db:5432/ainame
+      LANGGRAPH_DB_URI: postgresql://postgres:123456@postgres_db:5432/ainame
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672/
+      UPLOAD_DIR: /app/uploads
+      CHROMA_RAG_DB_PATH: /app/chroma_rag_db
+      OLLAMA_HOST: http://ollama:11434
+    volumes:
+      - uploads_data:/app/uploads
+      - chroma_data:/app/chroma_rag_db
+
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: FYZfyz123..
+      MYSQL_DATABASE: ainame397
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  postgres_db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 123456
+      POSTGRES_DB: ainame
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: always
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+
+volumes:
+  mysql_data:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  uploads_data:
+  chroma_data:
+  ollama_data:

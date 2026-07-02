@@ -1,0 +1,15 @@
+.env
+.env.*
+certs/
+uploads/
+chroma_rag_db/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.idea/
+tests/
+test_main.http
+*.pyc
+*.pyo
+*.pyd
+*.log

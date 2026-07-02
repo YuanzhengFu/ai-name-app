@@ -1,5 +1,4 @@
 ﻿from sqlalchemy import select
-
 from models.membership import UserMembership
 from models.name_history import NameHistory
 from models.naming_project import NamingProject
@@ -390,4 +389,5 @@ async def test_compare_histories_rejects_other_users_history(client, session_mak
 
     response = await client.post("/history/compare", json={"history_ids": history_ids}, headers=auth_headers(user.id))
     assert response.status_code == 404
+
 
